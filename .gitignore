@@ -3,3 +3,6 @@
 
 # Build folder
 build/
+
+.idea
+*.iml

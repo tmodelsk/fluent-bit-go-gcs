@@ -2,17 +2,17 @@ package main
 
 import (
 	"C"
-	"bytes"
 	"fmt"
+	jsoniter "github.com/json-iterator/go"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/fluent/fluent-bit-go/output"
 	"github.com/google/uuid"
-	jsoniter "github.com/json-iterator/go"
 )
 
 var (
@@ -53,6 +53,8 @@ func FLBPluginFlushCtx(ctx, data unsafe.Pointer, length C.int, tag *C.char) int 
 	log.Printf("[event] Flush called, context %s, %s, %v\n", values["region"], values["bucket"], C.GoString(tag))
 	dec := output.NewDecoder(data, int(length))
 
+	objectKey := ""
+	var stringBuilder strings.Builder
 	for {
 		ret, ts, record := output.GetRecord(dec)
 		if ret != 0 {
@@ -71,18 +73,25 @@ func FLBPluginFlushCtx(ctx, data unsafe.Pointer, length C.int, tag *C.char) int 
 			timestamp = time.Now()
 		}
 
-		line, err := createJSON(timestamp, C.GoString(tag), record)
+		if len(objectKey) == 0 {
+			objectKey = GenerateObjectKey(values["prefix"], C.GoString(tag), timestamp)
+		}
+
+		jsonStr, err := createJSON(timestamp, C.GoString(tag), record)
 		if err != nil {
 			log.Printf("[warn] error creating message for GCS: %v\n", err)
 			continue
 		}
 
-		objectKey := GenerateObjectKey(values["prefix"], C.GoString(tag), timestamp)
-		if err = gcsClient.Write(values["bucket"], objectKey, bytes.NewReader(line)); err != nil {
-			log.Printf("[warn] error sending message in GCS: %v\n", err)
-			return output.FLB_RETRY
-		}
+		stringBuilder.WriteString(jsonStr)
+		stringBuilder.WriteString("\n")
 	}
+
+	if err = gcsClient.Write(values["bucket"], objectKey, strings.NewReader(stringBuilder.String())); err != nil {
+		log.Printf("[warn] error sending message in GCS: %v\n", err)
+		return output.FLB_RETRY
+	}
+
 
 	// Return options:
 	//
@@ -116,10 +125,23 @@ func parseMap(mapInterface map[interface{}]interface{}) map[string]interface{} {
 	return m
 }
 
-func createJSON(timestamp time.Time, tag string, record map[interface{}]interface{}) ([]byte, error) {
+func createJSON(timestamp time.Time, tag string, record map[interface{}]interface{}) (string, error) {
+	m := parseMap(record)
+
+	jsonStr, err := jsoniter.MarshalToString(m)
+	//js, err := json.Marshal(m)
+	if err != nil {
+		return "{}", err
+	}
+
+	return jsonStr, nil
+}
+
+func createJSONAsBytes(timestamp time.Time, tag string, record map[interface{}]interface{}) ([]byte, error) {
 	m := parseMap(record)
 
 	js, err := jsoniter.Marshal(m)
+	//js, err := json.Marshal(m)
 	if err != nil {
 		return []byte("{}"), err
 	}

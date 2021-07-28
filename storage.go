@@ -40,3 +40,6 @@ func (c Client) Write(bucket, object string, content io.Reader) error {
 
 	return nil
 }
+
+// https://stackoverflow.com/questions/20876780/how-to-append-write-to-google-cloud-storage-file-from-app-engine/20876882
+// Compose(..) {   c.GCS.Bucket(bucket).Object(object).ComposerFrom().Run(c.CTX) }
